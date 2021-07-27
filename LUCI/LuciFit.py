@@ -68,8 +68,8 @@ class Fit:
 
     """
 
-    def __init__(self, spectrum, axis, wavenumbers_syn, model_type, lines, vel_rel, sigma_rel,
-                 ML_model, trans_filter, theta=0, delta_x=2, n_steps=842, filter='SN3', bayes_bool=False, Plot_bool=False):
+    def __init__(self, spectrum, wavenumbers_syn, model_type, lines, vel_rel, sigma_rel,
+                 ML_model, bkg, binning, redshift, transmission_interpolate_func, theta=0, delta_x=2, n_steps=842, order= 8, filter='SN3', bayes_bool=False, Plot_bool=False):
         """
         Args:
             spectrum: Spectrum of interest. This should not be the interpolated spectrum nor normalized(numpy array)
@@ -81,10 +81,14 @@ class Fit:
             vel_rel: Constraints on Velocity/Position (must be list; e.x. [1, 2, 1])
             sigma_rel: Constraints on sigma (must be list; e.x. [1, 2, 1])
             ML_model: Tensorflow/keras machine learning model
-            trans_filter: Tranmission filter interpolated on unredshifted spectral axis
+            bkg:
+            binning:
+            redshift:
+            transmission_interpolate_func: Tranmission filter interpolated on unredshifted spectral axis
             theta: Interferometric angle in degrees (defaults to 11.960 -- this is so that the correction coeff is 1)
             delta_x: Step Delta
             n_steps: Number of steps in spectra
+            order: Spectral folding order
             filter: SITELLE filter (e.x. 'SN3')
             bayes_bool:
             Plot_bool: Boolean to determine whether or not to plot the spectrum (default = False)
@@ -95,29 +99,35 @@ class Fit:
                           'OII3729': 372.882, 'OIII4959': 495.891, 'OIII5007': 500.684,
                           'Hbeta': 486.133}
         self.available_functions = ['gaussian', 'sinc', 'sincgauss']
+        self.redshift = redshift
         self.spectrum = spectrum
         self.spectrum_clean = spectrum/ np.max(spectrum)  # Clean normalized spectrum that will be used for calculating the noise
-        self.axis = axis  # Redshifted axis
-        #self.axis_unshifted = axis_unshifted  # Non-redshifted axis
-        self.wavenumbers_syn = wavenumbers_syn
-        self.model_type = model_type
-        self.lines = lines
-        self.line_num = len(lines)  # Number of  lines to fit
-        self.trans_filter = trans_filter
-        self.apply_transmission()  # Apply transmission filter
-        self.filter = filter
-        self.spectrum_interpolated = np.zeros_like(self.spectrum)
-        self.spectrum_normalized = self.spectrum / np.max(self.spectrum)  # Normalized spectrum
-        self.spectrum_interp_norm = np.zeros_like(self.spectrum)
+        self.axis = None
         self.theta = theta
         self.cos_theta = np.abs(np.cos(self.theta))
         self.correction_factor = 1.0  # Initialize Correction factor
         self.axis_step = 0.0  # Initialize
         self.delta_x = delta_x
         self.n_steps = n_steps
+        self.order = order
         self.calculate_correction()
-        # Update axis with correction factor
-        #self.axis = self.axis*self.correction_factor
+        self.calculate_axis()
+        self.bkg = bkg
+        self.binning = binning
+        self.bkg_subtract()
+        #self.axis = axis  # Redshifted axis
+        #self.axis_unshifted = axis_unshifted  # Non-redshifted axis
+        self.wavenumbers_syn = wavenumbers_syn
+        self.model_type = model_type
+        self.lines = lines
+        self.line_num = len(lines)  # Number of  lines to fit
+        self.transmission_interpolate_func = transmission_interpolate_func
+        self.trans_filter = None
+        self.apply_transmission()  # Apply transmission filter
+        self.filter = filter
+        self.spectrum_interpolated = np.zeros_like(self.spectrum)
+        self.spectrum_normalized = self.spectrum / np.max(self.spectrum)  # Normalized spectrum
+        self.spectrum_interp_norm = np.zeros_like(self.spectrum)
         # Calculate noise
         self.noise = 1e-2  # Initialize
         self.calculate_noise()
@@ -149,8 +159,21 @@ class Fit:
         self.check_lengths()
 
 
+    def bkg_subtract(self):
+        """
 
-
+        """
+        if self.bkg is not None:
+            # Interpolate background
+            #f = interpolate.interp1d(self.axis, self.bkg, kind='slinear', fill_value="extrapolate")
+            #self.bkg = f(self.axis)
+            if self.binning:
+                self.spectrum -= self.bkg * self.binning**2  # Subtract background spectrum
+            else:
+                self.spectrum -= self.bkg  # Subtract background spectrum
+        good_sky_inds = [~np.isnan(self.spectrum)]  # Clean up spectrum
+        self.spectrum = self.spectrum[good_sky_inds]
+        self.axis = self.axis[good_sky_inds]
 
 
 
@@ -162,6 +185,7 @@ class Fit:
         division since we have already interpolated the transition filter vector
         over the UNSHIFTED spectral axis.
         """
+        self.trans_filter = self.transmission_interpolate_func(self.axis)
         self.spectrum = [self.spectrum[i]/self.trans_filter[i] if self.trans_filter[i] > 0.5 else self.spectrum[i] for i in range(len(self.spectrum))]
 
 
@@ -170,7 +194,19 @@ class Fit:
         Calculate correction factor based of interferometric angle. This is used to correct the broadening
         """
         self.correction_factor = 1/self.cos_theta
-        self.axis_step = self.correction_factor / (2*self.delta_x*self.n_steps) * 1e7
+        self.axis_step = 1e7 * self.correction_factor / (2*self.delta_x*self.n_steps)
+
+
+    def calculate_axis(self):
+        """
+        Calculate the wavelength axis in units cm-1
+        """
+        min_ = 1e7  * (self.order / (2*self.delta_x)) + 1e7  / (2*self.delta_x*self.n_steps)
+        max_ = 1e7  * ((self.order + 1) / (2*self.delta_x)) - 1e7  / (2*self.delta_x*self.n_steps)
+        self.axis = np.linspace(min_, max_, self.n_steps)*(1+self.redshift)
+        #plt.plot(self.axis, self.spectrum)
+        #exit()
+
 
 
 
@@ -243,7 +279,7 @@ class Fit:
             Populates self.spectrum_interpolated, self.spectrum_scale, and self.spectrum_interp_norm.
 
         """
-        f = interpolate.interp1d(self.axis, self.spectrum, kind='slinear')
+        f = interpolate.interp1d(self.axis, self.spectrum, kind='slinear', fill_value="extrapolate")
         self.spectrum_interpolated = f(self.wavenumbers_syn)
         self.spectrum_scale = np.max(self.spectrum_interpolated)
         self.spectrum_interp_norm = self.spectrum_interpolated / self.spectrum_scale

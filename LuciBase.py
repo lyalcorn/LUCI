@@ -59,7 +59,7 @@ class Luci():
         self.wavenumbers_syn = None
         self.hdr_dict = None
         self.interferometer_theta = None
-        self.transmission_interpolated = None
+        self.transmission_interpolate_func = None
         self.read_in_cube()
         self.spectrum_axis_func()
         if ML_bool is True:
@@ -236,7 +236,7 @@ class Luci():
         """
         transmission = np.loadtxt('%s/Data/%s_filter.dat'%(self.Luci_path, self.hdr_dict['FILTER']))  # first column - axis; second column - value
         f = interpolate.interp1d(transmission[:,0], [val/100 for val in transmission[:,1]], kind='slinear', fill_value="extrapolate")
-        self.transmission_interpolated = f(self.spectrum_axis_unshifted)
+        self.transmission_interpolate_func = f#(self.spectrum_axis_unshifted)
 
     def bin_cube(self, binning, x_min, x_max, y_min, y_max):
         """
@@ -388,19 +388,21 @@ class Luci():
                     sky = self.cube_binned[x_pix, y_pix, :]
                 else:
                     sky = self.cube_final[x_pix, y_pix, :]
-                if bkg is not None:
-                    if binning:
-                        sky -= bkg * binning**2  # Subtract background spectrum
-                    else:
-                        sky -= bkg  # Subtract background spectrum
-                good_sky_inds = [~np.isnan(sky)]  # Clean up spectrum
-                sky = sky[good_sky_inds]
-                axis = self.spectrum_axis[good_sky_inds]
+                #if bkg is not None:
+                #    if binning:
+                #        sky -= bkg * binning**2  # Subtract background spectrum
+                #    else:
+                #        sky -= bkg  # Subtract background spectrum
+                #good_sky_inds = [~np.isnan(sky)]  # Clean up spectrum
+                #sky = sky[good_sky_inds]
+                #axis = self.spectrum_axis[good_sky_inds]
                 # Call fit!
-                fit = Fit(sky, axis, self.wavenumbers_syn, fit_function, lines, vel_rel, sigma_rel,
-                        self.model_ML, trans_filter = self.transmission_interpolated,
+                fit = Fit(sky, self.wavenumbers_syn, fit_function, lines, vel_rel, sigma_rel,
+                        self.model_ML, bkg = bkg, binning = binning, redshift = self.redshift,
+                        transmission_interpolate_func = self.transmission_interpolate_func,
                         theta=self.interferometer_theta[x_pix, y_pix],
                         delta_x = self.hdr_dict['STEP'], n_steps = self.hdr_dict['STEPNB'],
+                        order = self.hdr_dict['ORDER'],
                         filter = self.hdr_dict['FILTER'],
                         Plot_bool = False, bayes_bool=bayes_bool)
                 fit_dict = fit.fit()
@@ -542,20 +544,22 @@ class Luci():
                         sky = self.cube_binned[x_pix, y_pix, :]
                     else:
                         sky = self.cube_final[x_pix, y_pix, :]
-                    if bkg is not None:
-                        if binning:
-                            sky -= bkg * binning**2  # Subtract background spectrum
-                        else:
-                            sky -= bkg  # Subtract background spectrum
+                    #if bkg is not None:
+                    #    if binning:
+                    #        sky -= bkg * binning**2  # Subtract background spectrum
+                    #    else:
+                    #        sky -= bkg  # Subtract background spectrum
                     ct += 1
-                    good_sky_inds = [~np.isnan(sky)]  # Clean up spectrum
-                    sky = sky[good_sky_inds]
-                    axis = self.spectrum_axis[good_sky_inds]
+                    #good_sky_inds = [~np.isnan(sky)]  # Clean up spectrum
+                    #sky = sky[good_sky_inds]
+                    #axis = self.spectrum_axis[good_sky_inds]
                     # Call fit!
                     fit = Fit(sky, axis, self.wavenumbers_syn, fit_function, lines, vel_rel, sigma_rel,
-                            self.model_ML, trans_filter = self.transmission_interpolated,
+                            self.model_ML, bkg = bkg, binning = binning,
+                            trans_filter = self.transmission_interpolate_func,
                             theta = self.interferometer_theta[x_pix, y_pix],
                             delta_x = self.hdr_dict['CDELT3'], n_steps = self.hdr_dict['STEPNB'],
+                            order = self.hdr_dict['ORDER'],
                             filter = self.hdr_dict['FILTER'],
                             Plot_bool = False, bayes_bool=bayes_bool)
                     fit_dict = fit.fit()
@@ -745,16 +749,18 @@ class Luci():
                     pass
         if mean == True:
             integrated_spectrum /= spec_ct
-        if bkg is not None:
-            integrated_spectrum -= bkg  # Subtract background spectrum
-        good_sky_inds = [~np.isnan(integrated_spectrum)]  # Clean up spectrum
-        sky = integrated_spectrum[good_sky_inds]
-        axis = self.spectrum_axis[good_sky_inds]
+        #if bkg is not None:
+        #    integrated_spectrum -= bkg  # Subtract background spectrum
+        #good_sky_inds = [~np.isnan(integrated_spectrum)]  # Clean up spectrum
+        #sky = integrated_spectrum[good_sky_inds]
+        #axis = self.spectrum_axis[good_sky_inds]
         # Call fit!
-        fit = Fit(sky, axis, self.wavenumbers_syn, fit_function, lines, vel_rel, sigma_rel,
-                self.model_ML, trans_filter = self.transmission_interpolated,
+        fit = Fit(sky, self.wavenumbers_syn, fit_function, lines, vel_rel, sigma_rel,
+                self.model_ML, bkg = bkg, binning = binning,
+                trans_filter = self.transmission_interpolated,
                 theta = self.interferometer_theta[x_pix, y_pix],
                 delta_x = self.hdr_dict['CDELT3'], n_steps = self.hdr_dict['STEPNB'],
+                order = self.hdr_dict['ORDER'],
                 filter = self.hdr_dict['FILTER'],
                 Plot_bool = False, bayes_bool=bayes_bool)
         fit_dict = fit.fit()
