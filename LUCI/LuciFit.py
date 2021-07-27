@@ -201,9 +201,11 @@ class Fit:
         """
         Calculate the wavelength axis in units cm-1
         """
-        min_ = 1e7  * (self.order / (2*self.delta_x)) + 1e7  / (2*self.delta_x*self.n_steps)
-        max_ = 1e7  * ((self.order + 1) / (2*self.delta_x)) - 1e7  / (2*self.delta_x*self.n_steps)
-        self.axis = np.linspace(min_, max_, self.n_steps)*(1+self.redshift)
+        min_ = 1e7  * np.abs(1/self.cos_theta) * (self.hdr_dict['ORDER'] / (2*self.hdr_dict['STEP']))# + 1e7  / (2*self.delta_x*self.n_steps)
+        max_ = 1e7  * np.abs(1/self.cos_theta) * ((self.hdr_dict['ORDER'] + 1) / (2*self.hdr_dict['STEP']))# - 1e7  / (2*self.delta_x*self.n_steps)
+        step_ = max_ - min_
+        axis = np.array([min_+j*step_/self.hdr_dict['STEPNB'] for j in range(self.hdr_dict['STEPNB'])])
+        #np.linspace(min_, max_, self.n_steps)*(1+self.redshift)
         #plt.plot(self.axis, self.spectrum)
         #exit()
 

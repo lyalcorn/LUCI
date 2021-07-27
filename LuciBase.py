@@ -203,7 +203,7 @@ class Luci():
         Create the x-axis for the spectra. We must construct this from header information
         since each pixel only has amplitudes of the spectra at each point.
         """
-        len_wl = self.cube_final.shape[2]  # Length of Spectral Axis
+        len_wl = self.hdr_dict['STEPNB']  # Length of Spectral Axis
         start = self.hdr_dict['CRVAL3']  # Starting value of the spectral x-axis
         end = start + (len_wl)*self.hdr_dict['CDELT3']  # End
         #step = hdr_dict['CDELT3']  # Step size
@@ -558,7 +558,7 @@ class Luci():
                             self.model_ML, bkg = bkg, binning = binning,
                             trans_filter = self.transmission_interpolate_func,
                             theta = self.interferometer_theta[x_pix, y_pix],
-                            delta_x = self.hdr_dict['CDELT3'], n_steps = self.hdr_dict['STEPNB'],
+                            delta_x = self.hdr_dict['STEP'], n_steps = self.hdr_dict['STEPNB'],
                             order = self.hdr_dict['ORDER'],
                             filter = self.hdr_dict['FILTER'],
                             Plot_bool = False, bayes_bool=bayes_bool)
@@ -604,7 +604,29 @@ class Luci():
         return velocity_fits, broadening_fits, flux_fits, chi2_fits, mask
 
 
-    def extract_spectrum(self, x_min, x_max, y_min, y_max, bkg=None, binning=None, mean=False):
+    def make_axis(self, x_pix, y_pix):
+        """
+        Make wavelength axis
+        """
+        #min_ = 1e7  * np.abs(1/np.cos(self.interferometer_theta[x_pix, y_pix])) * (self.hdr_dict['ORDER'] / (2*self.hdr_dict['STEP']))# + 1e7  / (2*self.delta_x*self.n_steps)
+        #max_ = 1e7  * np.abs(1/np.cos(self.interferometer_theta[x_pix, y_pix])) * ((self.hdr_dict['ORDER'] + 1) / (2*self.hdr_dict['STEP']))# - 1e7  / (2*self.delta_x*self.n_steps)
+        min_ = 1e7  * np.abs(np.cos(self.interferometer_theta[x_pix, y_pix])) * (self.hdr_dict['ORDER'] / (2*self.hdr_dict['STEP']))
+        max_ = 1e7  * np.abs(np.cos(self.interferometer_theta[x_pix, y_pix])) * ((self.hdr_dict['ORDER'] + 1) / (2*self.hdr_dict['STEP']))
+        step_ = max_ - min_
+        axis = np.array([min_+j*step_/self.hdr_dict['STEPNB'] for j in range(self.hdr_dict['STEPNB'])])*(self.redshift+1)
+        return axis
+
+
+    def interpolate_func(self, axis_orig, spec_orig, axis_new):
+        """
+
+        """
+        f = interpolate.interp1d(axis_orig, spec_orig, kind='slinear', fill_value="extrapolate")
+        bkg_int = f(axis_new)
+        return bkg_int
+
+
+    def extract_spectrum(self, x_min, x_max, y_min, y_max, mean=False):
         """
         Extract spectrum in region. This is primarily used to extract background regions.
         The spectra in the region are summed and then averaged (if mean is selected).
@@ -616,8 +638,6 @@ class Luci():
             x_max: Upper bound in x
             y_min: Lower bound in y
             y_max: Upper bound in y
-            bkg: Background Spectrum (1D numpy array; default None)
-            binning:  Value by which to bin (default None)
             mean: Boolean to determine whether or not the mean spectrum is taken. This is used for calculating background spectra.
         Return:
             X-axis and spectral axis of region.
@@ -626,11 +646,6 @@ class Luci():
         integrated_spectrum = np.zeros(self.cube_final.shape[2])
         spec_ct = 0
         # Initialize fit solution arrays
-        if binning != None:
-            self.bin_cube(binning, x_min, x_max, y_min, y_max)
-            #x_min = int(x_min/binning) ; y_min = int(y_min/binning) ; x_max = int(x_max/binning) ;  y_max = int(y_max/binning)
-            x_max = int((x_max-x_min)/binning) ;  y_max = int((y_max-y_min)/binning)
-            x_min = 0 ; y_min = 0
         for i in tqdm(range(x_max-x_min)):
             y_pix = y_min + i
             vel_local = []
@@ -640,23 +655,23 @@ class Luci():
             chi2_local = []
             for j in range(y_max-y_min):
                 x_pix = x_min+j
-                if binning is not None:
-                    sky = self.cube_binned[x_pix, y_pix, :]
-                else:
-                    sky = self.cube_final[x_pix, y_pix, :]
-                if bkg is not None:
-                    if binning:
-                        sky -= bkg * binning**2  # Subtract background spectrum
-                    else:
-                        sky -= bkg  # Subtract background spectrum
+                # calculate axis
+                axis = self.make_axis(x_pix, y_pix)
+                sky = self.cube_final[x_pix, y_pix, :]
                 good_sky_inds = [~np.isnan(sky)]  # Clean up spectrum
-                integrated_spectrum += sky[good_sky_inds]
+                sky = sky#[good_sky_inds]
+                axis = axis#[good_sky_inds]
+                print(np.min(self.spectrum_axis), np.max(self.spectrum_axis))
+                plt.plot(axis, sky)
+                sky = self.interpolate_func(axis, sky, self.spectrum_axis_unshifted)
+                plt.plot(self.spectrum_axis_unshifted, sky)
+                integrated_spectrum += sky
                 if spec_ct == 0:
-                    axis = self.spectrum_axis[good_sky_inds]
+                    axis_base = self.spectrum_axis
                     spec_ct +=1
         if mean == True:
             integrated_spectrum /= spec_ct
-        return axis, integrated_spectrum
+        return axis_base, integrated_spectrum
 
 
     def extract_spectrum_region(self, region, mean=False):
