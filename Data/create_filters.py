@@ -22,5 +22,9 @@ def create_new(filter):
     # Save as .dat file
     np.savetxt('%s_filter.dat'%filter, combined, fmt='%.2f')
 
+<<<<<<< HEAD
 for filter_ in ['C1', 'C2', 'C4']:
+=======
+for filter_ in ['SN1', 'SN2', 'SN3', 'C4']:
+>>>>>>> 6621bf1f303c9dbb409e1210d86d9237a6bbd8f2
     create_new(filter_)
